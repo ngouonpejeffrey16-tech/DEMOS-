@@ -13,6 +13,7 @@ Hands-on demos of core GenAI engineering patterns in Python: calling LLM APIs, c
 | `03_mini_rag.py` | Minimal RAG pipeline: chunking, vectorization, similarity search, grounded generation |
 | `04_langgraph_agent.py` | A LangGraph agent: StateGraph, tool node, conditional edges, loop until done |
 | `05_data_cleaning.py` | Data cleaning with pandas: duplicates, mixed date formats, missing values, outliers |
+| `tests/` | Unit tests (pytest) for the deterministic parts: retrieval and data cleaning |
 
 ## Quick start
 
@@ -34,11 +35,26 @@ python 05_data_cleaning.py   # no API key needed
 
 The demos use an **OpenAI-compatible client**, so the same code works with Groq, Mistral, OpenAI, or a local server (Ollama, vLLM) — just change `BASE_URL` and `MODEL_NAME` in `.env`.
 
+## Tests & CI
+
+```bash
+pytest -v
+```
+
+20 tests run fully offline — no API key, no network. They cover the two
+deterministic parts of the codebase: the RAG **retrieval** step and the
+**data cleaning** pipeline. Generation itself is not asserted on (LLM output
+is non-deterministic); in production you would evaluate it separately with a
+dedicated eval set.
+
+Every push runs the suite on Python 3.11 and 3.12 via GitHub Actions
+(`.github/workflows/tests.yml`).
+
 ## Design notes
 
 - **`05_data_cleaning.py`** runs fully offline. Key principle demonstrated: order matters — normalize text before deduplicating, parse dates explicitly (never guess day/month), and flag outliers *before* imputing missing values so they don't pollute the statistics.
 
-- **`03_mini_rag.py`** uses TF-IDF vectors so it runs offline with zero API cost for the retrieval step. In production (as in MIA), you would swap this for a proper embedding model and a vector database (e.g. Azure OpenAI embeddings + CosmosDB vector search). The pipeline shape — chunk, vectorize, retrieve top-k by similarity, ground the prompt — is identical.
+- **`03_mini_rag.py`** implements TF-IDF and cosine similarity from scratch (standard library only), so the retrieval mechanics are explicit and the demo has no heavy compiled dependencies. In production (as in MIA), you would swap this for a proper embedding model and a vector database (e.g. Azure OpenAI embeddings + CosmosDB vector search). The pipeline shape — chunk, vectorize, retrieve top-k by similarity, ground the prompt — is identical.
 - **`04_langgraph_agent.py`** shows the canonical agent loop: an LLM node decides whether to call a tool, a conditional edge routes to the tool node or to END, and the tool result loops back to the LLM.
 
 ## AI-assisted development
@@ -47,5 +63,4 @@ This repository was built with AI assistance (Claude) as part of my daily workfl
 
 ## Author
 
-**Jeffrey Gandhi Ngouonpe** — Master's student in Data & AI at EFREI Paris.
-Certified AZ-900 · AI-900 · SC-900.
+Jeffrey Gandhi Ngouonpe 
