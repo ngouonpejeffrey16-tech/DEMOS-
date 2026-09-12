@@ -1,5 +1,7 @@
 # LLM Engineering Demos
 
+[![tests](https://github.com/ngouonpejeffrey16-tech/llm-engineering-demos/actions/workflows/tests.yml/badge.svg)](https://github.com/ngouonpejeffrey16-tech/llm-engineering-demos/actions/workflows/tests.yml)
+
 Hands-on demos of core GenAI engineering patterns in Python: calling LLM APIs, comparing models, Retrieval-Augmented Generation (RAG), and agent orchestration with LangGraph.
 
 > Built as a companion to my main project **MIA** — an enterprise RAG chatbot (Azure OpenAI + CosmosDB + FastAPI, integrated into Microsoft Teams) that cut document search time by ~70%.
@@ -13,6 +15,7 @@ Hands-on demos of core GenAI engineering patterns in Python: calling LLM APIs, c
 | `03_mini_rag.py` | Minimal RAG pipeline: chunking, vectorization, similarity search, grounded generation |
 | `04_langgraph_agent.py` | A LangGraph agent: StateGraph, tool node, conditional edges, loop until done |
 | `05_data_cleaning.py` | Data cleaning with pandas: duplicates, mixed date formats, missing values, outliers |
+| `tests/` | Unit tests (pytest) for the deterministic parts: retrieval and data cleaning |
 
 ## Quick start
 
@@ -34,12 +37,34 @@ python 05_data_cleaning.py   # no API key needed
 
 The demos use an **OpenAI-compatible client**, so the same code works with Groq, Mistral, OpenAI, or a local server (Ollama, vLLM) — just change `BASE_URL` and `MODEL_NAME` in `.env`.
 
+> **Model names go stale.** Providers deprecate models regularly, so a hardcoded
+> name returns a 404 sooner or later. List what your account can actually reach:
+>
+> ```bash
+> python -c "import os; from dotenv import load_dotenv; from openai import OpenAI; load_dotenv(); c=OpenAI(api_key=os.environ['LLM_API_KEY'], base_url=os.getenv('BASE_URL')); [print(m.id) for m in c.models.list().data]"
+> ```
+
+## Tests & CI
+
+```bash
+pytest -v
+```
+
+20 tests run fully offline — no API key, no network. They cover the two
+deterministic parts of the codebase: the RAG **retrieval** step and the
+**data cleaning** pipeline. Generation itself is not asserted on (LLM output
+is non-deterministic); in production you would evaluate it separately with a
+dedicated eval set.
+
+Every push runs the suite on Python 3.11 and 3.12 via GitHub Actions
+(`.github/workflows/tests.yml`).
+
 ## Design notes
 
 - **`05_data_cleaning.py`** runs fully offline. Key principle demonstrated: order matters — normalize text before deduplicating, parse dates explicitly (never guess day/month), and flag outliers *before* imputing missing values so they don't pollute the statistics.
 
-- **`03_mini_rag.py`** uses TF-IDF vectors so it runs offline with zero API cost for the retrieval step. In production (as in MIA), you would swap this for a proper embedding model and a vector database (e.g. Azure OpenAI embeddings + CosmosDB vector search). The pipeline shape — chunk, vectorize, retrieve top-k by similarity, ground the prompt — is identical.
-- **`04_langgraph_agent.py`** shows the canonical agent loop: an LLM node decides whether to call a tool, a conditional edge routes to the tool node or to END, and the tool result loops back to the LLM.
+- **`03_mini_rag.py`** implements TF-IDF and cosine similarity from scratch (standard library only), so the retrieval mechanics are explicit and the demo has no heavy compiled dependencies. In production (as in MIA), you would swap this for a proper embedding model and a vector database (e.g. Azure OpenAI embeddings + CosmosDB vector search). The pipeline shape — chunk, vectorize, retrieve top-k by similarity, ground the prompt — is identical.
+- **`04_langgraph_agent.py`** shows the canonical agent loop: an LLM node decides whether to call a tool, a conditional edge routes to the tool node or to END, and the tool result loops back to the LLM. Note the `serialize()` helper: API responses carry provider-specific fields (`annotations`, `reasoning`) that the same API rejects when sent back in the next request, so assistant messages have to be converted before being appended to the history.
 
 ## AI-assisted development
 
@@ -48,4 +73,3 @@ This repository was built with AI assistance (Claude) as part of my daily workfl
 ## Author
 
 **Jeffrey Gandhi Ngouonpe** — Master's student in Data & AI at EFREI Paris.
-Certified AZ-900 · AI-900 · SC-900.
