@@ -56,13 +56,36 @@ class AgentState(TypedDict):
 
 
 # --- 2. Nodes: plain Python functions -------------------------------------
+def serialize(message) -> dict:
+    """Convert an API response message back into a request-shaped dict.
+
+    Responses carry provider-specific extras (annotations, reasoning,
+    refusal...) that the API rejects when sent back, so we keep only the
+    fields the chat completions format actually accepts.
+    """
+    payload = {"role": message.role, "content": message.content or ""}
+    if message.tool_calls:
+        payload["tool_calls"] = [
+            {
+                "id": call.id,
+                "type": "function",
+                "function": {
+                    "name": call.function.name,
+                    "arguments": call.function.arguments,
+                },
+            }
+            for call in message.tool_calls
+        ]
+    return payload
+
+
 def agent_node(state: AgentState) -> AgentState:
     """LLM reads the conversation and decides: answer, or call a tool."""
     response = client.chat.completions.create(
         model=MODEL, messages=state["messages"], tools=TOOLS
     )
     message = response.choices[0].message
-    return {"messages": state["messages"] + [message.model_dump()]}
+    return {"messages": state["messages"] + [serialize(message)]}
 
 
 def tool_node(state: AgentState) -> AgentState:
