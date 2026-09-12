@@ -1,19 +1,24 @@
 """Demo 3 — Minimal RAG pipeline: chunk, vectorize, retrieve, generate.
 
+TF-IDF and cosine similarity are implemented from scratch (standard library
+only) to make the retrieval mechanics explicit — and to keep the demo free of
+heavy compiled dependencies.
+
 The pipeline shape is the same as a production RAG system (like my project
 MIA: Azure OpenAI + CosmosDB vector search):
   1. Split documents into chunks
-  2. Turn chunks into vectors (here: TF-IDF, offline; in prod: embeddings)
+  2. Turn chunks into vectors (here: TF-IDF; in prod: neural embeddings)
   3. Vectorize the user question and retrieve the top-k similar chunks
   4. Build a grounded prompt and let the LLM answer FROM the documents
 """
 
+import math
 import os
+import re
+from collections import Counter
 
 from dotenv import load_dotenv
 from openai import OpenAI
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 
 load_dotenv()
 
@@ -43,14 +48,61 @@ def chunk(documents: list[str]) -> list[str]:
     return documents
 
 
+def tokenize(text: str) -> list[str]:
+    """Lowercase and keep alphanumeric words only."""
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+
+def tfidf_vector(tokens: list[str], idf: dict[str, float]) -> dict[str, float]:
+    """Term Frequency x Inverse Document Frequency, as a sparse dict.
+
+    TF   = how often a word appears in THIS text (relative)
+    IDF  = how rare the word is across ALL texts -> rare words weigh more,
+           so 'the' contributes almost nothing while 'brake' is decisive.
+    """
+    counts = Counter(tokens)
+    total = len(tokens) or 1
+    return {
+        word: (count / total) * idf.get(word, 0.0)
+        for word, count in counts.items()
+    }
+
+
+def cosine(a: dict[str, float], b: dict[str, float]) -> float:
+    """Cosine similarity: the angle between two vectors, in [0, 1] here.
+    1.0 = same direction (same topic), 0.0 = no shared terms."""
+    shared = set(a) & set(b)
+    dot = sum(a[word] * b[word] for word in shared)
+    norm_a = math.sqrt(sum(value * value for value in a.values()))
+    norm_b = math.sqrt(sum(value * value for value in b.values()))
+    if not norm_a or not norm_b:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
 def retrieve(question: str, chunks: list[str], k: int = 2) -> list[str]:
     """Vectorize chunks + question, return the k most similar chunks."""
-    vectorizer = TfidfVectorizer()
-    matrix = vectorizer.fit_transform(chunks + [question])
-    chunk_vectors, question_vector = matrix[:-1], matrix[-1]
-    scores = cosine_similarity(question_vector, chunk_vectors)[0]
-    ranked = sorted(zip(scores, chunks), key=lambda pair: pair[0], reverse=True)
-    return [text for score, text in ranked[:k] if score > 0]
+    tokenized = [tokenize(text) for text in chunks]
+
+    # IDF is computed on the corpus only — the question must not change it.
+    n_docs = len(tokenized)
+    document_frequency = Counter(
+        word for tokens in tokenized for word in set(tokens)
+    )
+    idf = {
+        word: math.log((1 + n_docs) / (1 + freq)) + 1.0
+        for word, freq in document_frequency.items()
+    }
+
+    chunk_vectors = [tfidf_vector(tokens, idf) for tokens in tokenized]
+    question_vector = tfidf_vector(tokenize(question), idf)
+
+    scored = [
+        (cosine(question_vector, vector), text)
+        for vector, text in zip(chunk_vectors, chunks)
+    ]
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [text for score, text in scored[:k] if score > 0]
 
 
 def answer(question: str) -> str:
